@@ -1,532 +1,465 @@
-require('./Base');
+var Service, Characteristic;
+var exec2 = require("child_process").exec;
+var response;
 
-const inherits = require('util').inherits;
-const miio = require('miio');
-
-var Accessory, PlatformAccessory, Service, Characteristic, UUIDGen;
-
-MiAirPurifier = function(platform, config) {
-    this.init(platform, config);
-    
-    Accessory = platform.Accessory;
-    PlatformAccessory = platform.PlatformAccessory;
-    Service = platform.Service;
-    Characteristic = platform.Characteristic;
-    UUIDGen = platform.UUIDGen;
-    
-    this.device = new miio.Device({
-        address: this.config['ip'],
-        token: this.config['token']
-    });
-    
-    this.accessories = {};
-    if(!this.config['airPurifierDisable'] && this.config['airPurifierName'] && this.config['airPurifierName'] != "" && this.config['silentModeSwitchName'] && this.config['silentModeSwitchName'] != "") {
-        this.accessories['airPurifierAccessory'] = new MiAirPurifierAirPurifierAccessory(this);
-    }
-    if(!this.config['buzzerSwitchDisable'] && this.config['buzzerSwitchName'] && this.config['buzzerSwitchName'] != "") {
-        this.accessories['buzzerSwitchAccessory'] = new MiAirPurifierBuzzerSwitchAccessory(this);
-    }
-    if(!this.config['ledBulbDisable'] && this.config['ledBulbName'] && this.config['ledBulbName'] != "") {
-        this.accessories['ledBulbAccessory'] = new MiAirPurifierLEDBulbAccessory(this);
-    }
-    if(!this.config['airQualityDisable'] && this.config['airQualityName'] && this.config['airQualityName'] != "") {
-        this.accessories['airQualityAccessory'] = new MiAirPurifierAirQualityAccessory(this);
-    }
-    var accessoriesArr = this.obj2array(this.accessories);
-    
-    this.platform.log.debug("[MiAirPurifierPlatform][DEBUG]Initializing " + this.config["type"] + " device: " + this.config["ip"] + ", accessories size: " + accessoriesArr.length);
-    
-    return accessoriesArr;
-}
-inherits(MiAirPurifier, Base);
-
-MiAirPurifierAirPurifierAccessory = function(dThis) {
-    this.device = dThis.device;
-    this.name = dThis.config['airPurifierName'];
-    this.silentModeSwitchDisable = dThis.config['silentModeSwitchDisable'];
-    this.silentModeSwitchName = dThis.config['silentModeSwitchName'];
-    this.platform = dThis.platform;
+module.exports = function(homebridge) {
+    Service = homebridge.hap.Service;
+    Characteristic = homebridge.hap.Characteristic;
+    Accessory = homebridge.hap.Accessory;
+    //UUIDGen = homebridge.hap.uuid;
+    homebridge.registerAccessory('homebridge-samsung-airconditioner1', 'SamsungAirconditioner1', SamsungAirco1);
 }
 
-MiAirPurifierAirPurifierAccessory.prototype.getServices = function() {
-    var that = this;
-    var services = [];
+function SamsungAirco1(log, config) {
+    this.log = log;
+    this.name = config["name"];
+    this.ip = config["ip"];
+    this.token = config["token"];
+    this.patchCert = config["patchCert"];
+    this.accessoryName = config["name"];
+    this.setOn = true;
+    this.setOff = false;
+}
 
-    var infoService = new Service.AccessoryInformation();
-    infoService
-        .setCharacteristic(Characteristic.Manufacturer, "XiaoMi")
-        .setCharacteristic(Characteristic.Model, "AirPurifier")
-        .setCharacteristic(Characteristic.SerialNumber, "Undefined");
-    services.push(infoService);
+SamsungAirco1.prototype = {
 
-    var silentModeSwitch = new Service.Switch(this.silentModeSwitchName);
-    var silentModeOnCharacteristic = silentModeSwitch.getCharacteristic(Characteristic.On);
-    if(!this.silentModeSwitchDisable) {
-        services.push(silentModeSwitch);
-    }
-    
-    var airPurifierService = new Service.AirPurifier(this.name);
-    var activeCharacteristic = airPurifierService.getCharacteristic(Characteristic.Active);
-    var currentAirPurifierStateCharacteristic = airPurifierService.getCharacteristic(Characteristic.CurrentAirPurifierState);
-    var targetAirPurifierStateCharacteristic = airPurifierService.getCharacteristic(Characteristic.TargetAirPurifierState);
-//  var lockPhysicalControlsCharacteristic = airPurifierService.addCharacteristic(Characteristic.LockPhysicalControls);
-    var rotationSpeedCharacteristic = airPurifierService.addCharacteristic(Characteristic.RotationSpeed);
-    
-    var pm25DensityCharacteristic = airPurifierService.addCharacteristic(Characteristic.PM2_5Density);
-    var airQualityCharacteristic = airPurifierService.addCharacteristic(Characteristic.AirQuality);
-    services.push(airPurifierService);
-    
-    silentModeOnCharacteristic
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["mode"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - SilentModeSwitch - getOn: " + result);
-                
-                if(result[0] === "silent") {
-                    callback(null, true);
-                } else {
-                    callback(null, false);
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - SilentModeSwitch - getOn Error: " + err);
-                callback(err);
-            });
-        }.bind(this))
-        .on('set', function(value, callback) {
-            that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - SilentModeSwitch - setOn: " + value);
-            if(value) {
-                that.device.call("set_mode", ["silent"]).then(result => {
-                    that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - SilentModeSwitch - setOn Result: " + result);
-                    if(result[0] === "ok") {
-                        targetAirPurifierStateCharacteristic.updateValue(Characteristic.TargetAirPurifierState.AUTO);
-                        callback(null);
-                        
-                        if(Characteristic.Active.INACTIVE == activeCharacteristic.value) {
-                            activeCharacteristic.updateValue(Characteristic.Active.ACTIVE);
-                            currentAirPurifierStateCharacteristic.updateValue(Characteristic.CurrentAirPurifierState.PURIFYING_AIR);
-                        }
-                    } else {
-                        callback(new Error(result[0]));
-                    }
-                }).catch(function(err) {
-                    that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - SilentModeSwitch - setOn Error: " + err);
-                    callback(err);
-                });
+    execRequest: function(str, body, callback) {
+        exec2(str, function(error, stdout, stderr) {
+            callback(error, stdout, stderr)
+        })
+        //return stdout;
+    },
+    identify: function(callback) {
+        this.log("장치 확인됨");
+        callback(); // success
+    },
+
+    getServices: function() {
+
+        //var uuid;
+        //uuid = UUIDGen.generate(this.accessoryName);
+        this.aircoSamsung = new Service.HeaterCooler(this.name);
+
+        //전원 설정
+        this.aircoSamsung.getCharacteristic(Characteristic.Active)
+            .on('get', this.getActive.bind(this))
+            .on('set', this.setActive.bind(this));
+
+        //현재 온도
+        this.aircoSamsung.getCharacteristic(Characteristic.CurrentTemperature)
+            .setProps({
+                minValue: 0,
+                maxValue: 100,
+                minStep: 0.01
+            })
+            .on('get', this.getCurrentTemperature.bind(this));
+
+        //현재 모드 설정
+        this.aircoSamsung.getCharacteristic(Characteristic.TargetHeaterCoolerState)
+            .on('set', this.setCurrentHeaterCoolerState.bind(this))       
+            .on('get', this.getCurrentHeaterCoolerState.bind(this));
+   
+        //현재 모드 확인
+        this.aircoSamsung.getCharacteristic(Characteristic.CurrentHeaterCoolerState)
+            .on('set', this.setCurrentHeaterCoolerState.bind(this))       
+            .on('get', this.getCurrentHeaterCoolerState.bind(this));
+
+        //냉방모드 온도
+        this.aircoSamsung.getCharacteristic(Characteristic.CoolingThresholdTemperature)
+            .setProps({
+                minValue: 16,
+                maxValue: 30,
+                minStep: 1
+            })
+            .on('get', this.getHeatingUpOrDwTemperature.bind(this))
+            .on('set', this.setHeatingUpOrDwTemperature.bind(this));
+
+        //난방모드 온도        
+         this.aircoSamsung.getCharacteristic(Characteristic.HeatingThresholdTemperature)
+            .setProps({
+                minValue: 16,
+                maxValue: 30,
+                minStep: 1
+            })
+            .on('get', this.getHeatingUpOrDwTemperature.bind(this))
+            .on('set', this.setHeatingUpOrDwTemperature.bind(this)); 
+        
+        //스윙모드 설정
+        this.aircoSamsung.getCharacteristic(Characteristic.SwingMode)
+            .on('get', this.getSwingMode.bind(this))
+            .on('set', this.setSwingMode.bind(this));  
+
+        //바람세기 설정        
+        this.aircoSamsung.getCharacteristic(Characteristic.RotationSpeed)
+            .setProps({
+		    	minValue: 0,
+		    	maxValue: 5,
+		    	minStep: 1,
+		    })
+		.on('get', this.getRotationSpeed.bind(this))
+		.on('set', this.setRotationSpeed.bind(this));
+		
+        var informationService = new Service.AccessoryInformation();
+            .setCharacteristic(Characteristic.Manufacturer, "XiaoMi")
+            .setCharacteristic(Characteristic.Model, "AirPurifier")
+            .setCharacteristic(Characteristic.SerialNumber, "Undefined");
+        return [informationService, this.aircoSamsung];
+    },
+
+    //services
+
+
+    getHeatingUpOrDwTemperature: function(callback) {
+        var body;
+        str = 'curl -s -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure -X GET https://' + this.ip + ':8888/devices|jq \'.Devices[1].Temperatures[0].desired\'';
+
+        this.log(str);
+
+        this.execRequest(str, body, function(error, stdout, stderr) {
+            if (error) {
+                callback(error);
             } else {
-                if(Characteristic.Active.INACTIVE == activeCharacteristic.value) {
-                    callback(null);
-                } else {
-                    var nowModel = that.getModeByRotationSpeed(rotationSpeedCharacteristic.value);
-                    that.device.call("set_mode", [Characteristic.TargetAirPurifierState.AUTO == value ? 'auto' : nowModel]).then(result => {
-                        that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - SilentModeSwitch - setOn Result: " + result);
-                        if(result[0] === "ok") {
-                            callback(null);
-                        } else {
-                            callback(new Error(result[0]));
-                        }
-                    }).catch(function(err) {
-                        that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - SilentModeSwitch - setOn Error: " + err);
-                        callback(err);
-                    });
-                }
+                body = parseInt(stdout);
+                this.log("희망온도 확인 : " + stdout);
+
+                callback(null, body);
+                //callback();
+            }
+        }.bind(this))
+        //callback(null, null);
+    },
+
+    setHeatingUpOrDwTemperature: function(temp, callback) {
+        var body;
+
+        str = 'curl -X PUT -d \'{"desired": ' + temp + '}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/temperatures/0';
+        this.log(str);
+
+        this.execRequest(str, body, function(error, stdout, stderr) {
+            if (error) {
+                callback(error);
+            } else {
+            	this.log("희망온도 설정 : " + body);
+                callback(null, temp);
+                //callback();
             }
         }.bind(this));
+    },
     
-    activeCharacteristic
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["mode"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - Active - getActive: " + result);
-                
-                if(result[0] === "idle") {
-                    callback(null, Characteristic.Active.INACTIVE);
-                } else {
-                    callback(null, Characteristic.Active.ACTIVE);
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - Active - getActive Error: " + err);
-                callback(err);
-            });
-        }.bind(this))
-        .on('set', function(value, callback) {
-            that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - Active - setActive: " + value);
-            that.device.call("set_mode", [value ? "auto" : "idle"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - Active - setActive Result: " + result);
-                if(result[0] === "ok") {
-                    currentAirPurifierStateCharacteristic.updateValue(Characteristic.CurrentAirPurifierState.IDLE);
-                    callback(null);
-                    if(value) {
-                        currentAirPurifierStateCharacteristic.updateValue(Characteristic.CurrentAirPurifierState.PURIFYING_AIR);
-                        that.device.call("get_prop", ["mode"]).then(result => {
-                            if(result[0] === "silent") {
-                                silentModeOnCharacteristic.updateValue(true);
-                            } else {
-                                silentModeOnCharacteristic.updateValue(false);
-                            }
-                        }).catch(function(err) {
-                            that.platform.log.error("[MiAirPurifierPlatform][ERROR]AirPurifier2AirPurifierAccessory - Active - setActive Error: " + err);
-                            callback(err);
-                        });
-                    } else {
-                        currentAirPurifierStateCharacteristic.updateValue(Characteristic.CurrentAirPurifierState.INACTIVE);
-                        silentModeOnCharacteristic.updateValue(false);
-                    }
-                } else {
-                    callback(new Error(result[0]));
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - Active - setActive Error: " + err);
-                callback(err);
-            });
-        }.bind(this));
-       
-    currentAirPurifierStateCharacteristic
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["mode"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - CurrentAirPurifierState - getCurrentAirPurifierState: " + result);
-                
-                if(result[0] === "idle") {
-                    callback(null, Characteristic.CurrentAirPurifierState.INACTIVE);
-                } else {
-                    callback(null, Characteristic.CurrentAirPurifierState.PURIFYING_AIR);
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - CurrentAirPurifierState - getCurrentAirPurifierState Error: " + err);
-                callback(err);
-            });
-        }.bind(this));
-/*
-    lockPhysicalControlsCharacteristic
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["child_lock"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - LockPhysicalControls - getLockPhysicalControls: " + result);
-                callback(null, result[0] === "on" ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED);
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - LockPhysicalControls - getLockPhysicalControls Error: " + err);
-                callback(err);
-            });
-        }.bind(this))
-        .on('set', function(value, callback) {
-            that.device.call("set_child_lock", [value ? "on" : "off"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - LockPhysicalControls - setLockPhysicalControls Result: " + result);
-                if(result[0] === "ok") {
-                    callback(null);
-                } else {
-                    callback(new Error(result[0]));
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - LockPhysicalControls - setLockPhysicalControls Error: " + err);
-                callback(err);
-            });
-        }.bind(this));
-*/
-    targetAirPurifierStateCharacteristic
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["mode"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - TargetAirPurifierState - getTargetAirPurifierState: " + result);
-                
-                if(result[0] === "auto" || result[0] === "silent") {
-                    callback(null, Characteristic.TargetAirPurifierState.AUTO);
-                } else {
-                    callback(null, Characteristic.TargetAirPurifierState.MANUAL);
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - TargetAirPurifierState - getTargetAirPurifierState: " + err);
-                callback(err);
-            });
-        }.bind(this))
-        .on('set', function(value, callback) {
-            that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - TargetAirPurifierState - setTargetAirPurifierState: " + value);
-            var nowModel = that.getModeByRotationSpeed(rotationSpeedCharacteristic.value);
-            that.device.call("set_mode", [Characteristic.TargetAirPurifierState.AUTO == value ? (silentModeOnCharacteristic.value ? "silent" : "auto") : nowModel]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - TargetAirPurifierState - setTargetAirPurifierState Result: " + result);
-                if(result[0] === "ok") {
-                    callback(null);
-                } else {
-                    callback(new Error(result[0]));
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - TargetAirPurifierState - setTargetAirPurifierState Error: " + err);
-                callback(err);
-            });
-        }.bind(this));
-    
-    rotationSpeedCharacteristic
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["mode"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - RotationSpeed - getRotationSpeed: " + result);
-                if(result[0] === "low") {
-                    if(rotationSpeedCharacteristic.value > 0 && rotationSpeedCharacteristic.value <= 25) {
-                        callback(null, rotationSpeedCharacteristic.value);
-                    } else {
-                        callback(null, 25);
-                    }
-                } else if(result[0] === "medium") {
-                    if(rotationSpeedCharacteristic.value > 25 && rotationSpeedCharacteristic.value <= 50) {
-                        callback(null, rotationSpeedCharacteristic.value);
-                    } else {
-                        callback(null, 50);
-                    }
-                } else if(result[0] === "high") {
-                    if(rotationSpeedCharacteristic.value > 50 && rotationSpeedCharacteristic.value <= 75) {
-                        callback(null, rotationSpeedCharacteristic.value);
-                    } else {
-                        callback(null, 75);
-                    }
-                } else if(result[0] === "strong") {
-                    if(rotationSpeedCharacteristic.value > 75 && rotationSpeedCharacteristic.value <= 100) {
-                        callback(null, rotationSpeedCharacteristic.value);
-                    } else {
-                        callback(null, 100);
-                    }
-                } else {
-                    callback(null, 0);
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - RotationSpeed - getRotationSpeed Error: " + err);
-                callback(err);
-            });
-        }.bind(this))
-        .on('set', function(value, callback) {
-            that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - RotationSpeed - setRotationSpeed set: " + value);
-            if(value == 0) {
-                callback(null);
+    getCurrentTemperature: function(callback) {
+        var body;
+
+        str = 'curl -s -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure -X GET https://' + this.ip + ':8888/devices|jq \'.Devices[1].Temperatures[0].current\'';
+        this.log(str);
+
+        this.execRequest(str, body, function(error, stdout, stderr) {
+            if (error) {
+                callback(error);
             } else {
-                var nowModel = that.getModeByRotationSpeed(rotationSpeedCharacteristic.value);
-                var valueModel = that.getModeByRotationSpeed(value);
-                if(nowModel != valueModel) {
-                    that.device.call("set_mode", valueModel).then(result => {
-                        that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirPurifierAccessory - RotationSpeed - setRotationSpeed Result: " + result);
-                        if(result[0] === "ok") {
-                            callback(null);
-                        } else {
-                            callback(new Error(result[0]));
-                        }
-                    }).catch(function(err) {
-                        that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirPurifierAccessory - TargetAirPurifierState - getRotationSpeed: " + err);
-                        callback(err);
-                    })
-                } else {
-                    callback(null);
-                }
+                //callback();
+                body = parseInt(stdout);
+                this.log("현재온도: " + body);
+                this.aircoSamsung.getCharacteristic(Characteristic.CurrentTemperature).updateValue(body);
+            }
+            callback(null, body); //Mettere qui ritorno di stdout? o solo callback()
+        }.bind(this));
+
+    },
+
+    getRotationSpeed: function(callback) {
+        var str;
+        var body;
+        str = 'curl -s -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure -X GET https://' + this.ip + ':8888/devices|jq \'.Devices[1].Wind.speedLevel\'';
+        this.log(str);
+
+        this.execRequest(str, body, function(error, stdout, stderr) {
+            if (error) {
+                callback(error);
+            } else {
+                //callback();
+                body = parseInt(stdout)+1;
+                this.log("현재풍속: " + body);
+                this.aircoSamsung.getCharacteristic(Characteristic.RotationSpeed).updateValue(body);
+            }
+            callback(null, body);
+        }.bind(this));
+
+    },
+    
+    setRotationSpeed: function(state, callback) {
+
+        switch (state) {
+
+            case 1:
+                var body;
+                this.log("자동풍 설정")
+                str = 'curl -X PUT -d \'{"speedLevel": 0}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/wind';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;
+
+            case 2:
+                var body;
+                this.log("미풍 설정")
+                str = 'curl -X PUT -d \'{"speedLevel": 1}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/wind';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;
+                
+            case 3:
+                var body;
+                this.log("약풍 설정")
+                str = 'curl -X PUT -d \'{"speedLevel": 2}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/wind';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;
+                
+            case 4:
+                var body;
+                this.log("강풍 설정")
+                str = 'curl -X PUT -d \'{"speedLevel": 3}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/wind';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;                
+
+            case 5:
+                var body;
+                this.log("터보풍 설정")
+                str = 'curl -X PUT -d \'{"speedLevel": 4}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/wind';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;   
+
+                
+        }
+    },
+    
+    getSwingMode: function(callback) {
+        var str;
+        var body;
+        str = 'curl -s -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure -X GET https://' + this.ip + ':8888/devices|jq \'.Devices[1].Mode.options[1]\'';
+        this.log(str);
+
+        this.execRequest(str, body, function(error, stdout, stderr) {
+            if (error) {
+                callback(error);
+            } else {
+                this.response = stdout;
+                this.response = this.response.substr(1, this.response.length - 3);
+            if (this.response == "Comode_Off") {
+                callback(null, Characteristic.SwingMode.SWING_DISABLED);
+                this.log("무풍모드해제 확인");
+            } else if (this.response == "Comode_Nano") {
+                this.log("무풍모드 확인");
+                callback(null, Characteristic.SwingMode.SWING_ENABLED);
+            } else
+                this.log(this.response + "무풍모드 확인 오류");
             }
         }.bind(this));
 
-    pm25DensityCharacteristic
-	    .on('get', function(callback) {
-			this.device.call("get_prop", ["aqi"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifier2AirPurifierAccessory - aqi - getHumidity: " + result);
-                callback(null, result[0]);
+    },
+    
+    setSwingMode: function(state, callback) {
+
+        switch (state) {
+
+            case Characteristic.SwingMode.SWING_ENABLED:
+                var body;
+                this.log("무풍모드 설정")
+                str = 'curl -X PUT -d \'{"options": ["Comode_Nano"]}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/mode';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;
+
+            case Characteristic.SwingMode.SWING_DISABLED:
+                var body;
+                this.log("무풍모드해제 설정")
+                str = 'curl -X PUT -d \'{"modes": ["Comode_Off"]}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/mode';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;
+        }
+    },
+    
+    getActive: function(callback) {
+        var str;
+        var body;
+        str = 'curl -s -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure -X GET https://' + this.ip + ':8888/devices|jq \'.Devices[1].Operation.power\'';
+        this.log(str);
+
+        this.execRequest(str, body, function(error, stdout, stderr) {
+            if (error) {
+                callback(error);
+            } else {
+                this.response = stdout;
+                this.response = this.response.substr(1, this.response.length - 3);
+            if (this.response == "Off") {
+                callback(null, Characteristic.Active.INACTIVE);
+                this.log("전원 꺼짐");
+            } else if (this.response == "On") {
+                this.log("전원 켜짐");
+                callback(null, Characteristic.Active.ACTIVE);
+            } else
+                this.log(this.response + "연결 오류");
+            }
+        }.bind(this));
+
+    },
+
+    setActive: function(state, callback) {
+        var body;
+        var token, ip, patchCert;
+        token = this.token;
+        ip = this.ip;
+        patchCert = this.patchCert;
+        
+        var activeFuncion = function(state) {
+            if (state == Characteristic.Active.ACTIVE) {
+                str = 'curl -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + token + '" --cert ' + patchCert + ' --insecure -X PUT -d \'{"Operation" : {\"power"\ : \"On"\}}\' https://' + ip + ':8888/devices/0';
+                console.log("전원 켜짐");
+            } else {
+                console.log("전원 꺼짐");
+                str = 'curl -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + token + '" --cert ' + patchCert + ' --insecure -X PUT -d \'{"Operation" : {\"power"\ : \"Off"\}}\' https://' + ip + ':8888/devices/0';
+            }
+        }
+        activeFuncion(state);
+        this.log(str);
+
+        this.execRequest(str, body, function(error, stdout, stderr) {
+            if (error) {
+            } else {
+                //callback();
+                this.log(stdout);
+            }
+        }.bind(this));
+        callback();
+    },
+
+    getCurrentHeaterCoolerState: function(callback) {
+        var str;
+        var body;
+        str = 'curl -s -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure -X GET https://' + this.ip + ':8888/devices|jq \'.Devices[1].Mode.modes[0]\'';
+        this.log(str);
+
+        this.execRequest(str, body, function(error, stdout, stderr) {
+            if (error) {
+                callback(error);
+            } else {
+                this.response = stdout;
+                this.response = this.response.substr(1, this.response.length - 3);
+                if (this.response == "CoolClean" || this.response == "Cool") {
+                    this.log("냉방청정모드 확인");                	
+                    callback(null, Characteristic.CurrentHeaterCoolerState.COOLING);
+                } else if (this.response == "DryClean" || this.response == "Dry") {
+                    this.log("제습청정모드 확인");                	
+                    callback(null, Characteristic.CurrentHeaterCoolerState.HEATING);
+                } else if (this.response == "Auto" || this.response == "Wind") {
+                	this.log("공기청정모드 확인");
+                    callback(null, Characteristic.CurrentHeaterCoolerState.IDLE);
+                } else
+                    this.log(this.response + "는 설정에 없는 모드 입니다");
+                //callback();
+            }
+        }.bind(this));
+    },
+    
+    setCurrentHeaterCoolerState: function(state, callback) {
+
+        switch (state) {
+
+            case Characteristic.TargetHeaterCoolerState.AUTO:
+                var body;
+                this.log("공기청정모드로 설정");
+                str = 'curl -X PUT -d \'{"modes": ["Wind"]}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/mode';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;
+
+            case Characteristic.TargetHeaterCoolerState.HEAT:
+                var body;
+                this.log("제습청정모드로 설정");
+                str = 'curl -X PUT -d \'{"modes": ["DryClean"]}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/mode';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;
                 
-                var airQualityValue = Characteristic.AirQuality.UNKNOWN;
-                if(result[0] <= 50) {
-                    airQualityValue = Characteristic.AirQuality.EXCELLENT;
-                } else if(result[0] > 50 && result[0] <= 100) {
-                    airQualityValue = Characteristic.AirQuality.GOOD;
-                } else if(result[0] > 100 && result[0] <= 200) {
-                    airQualityValue = Characteristic.AirQuality.FAIR;
-                } else if(result[0] > 200 && result[0] <= 300) {
-                    airQualityValue = Characteristic.AirQuality.INFERIOR;
-                } else if(result[0] > 300) {
-                    airQualityValue = Characteristic.AirQuality.POOR;
-                } else {
-                    airQualityValue = Characteristic.AirQuality.UNKNOWN;
-                }
-                airQualityCharacteristic.updateValue(airQualityValue);
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifier2AirPurifierAccessory - aqi - getHumidity Error: " + err);
-                callback(err);
-            });
-	    }.bind(this));
-
-    // var filterMaintenanceService = new Service.FilterMaintenance(this.name);
-    var filterChangeIndicationCharacteristic = airPurifierService.getCharacteristic(Characteristic.FilterChangeIndication);
-    var filterLifeLevelCharacteristic = airPurifierService.addCharacteristic(Characteristic.FilterLifeLevel);
-
-    filterChangeIndicationCharacteristic
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["filter1_life"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifier2AirPurifierAccessory - FilterChangeIndication - getFilterChangeIndication: " + result);
-                callback(null, result[0] < 5 ? Characteristic.FilterChangeIndication.CHANGE_FILTER : Characteristic.FilterChangeIndication.FILTER_OK);
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifier2AirPurifierAccessory - FilterChangeIndication - getFilterChangeIndication Error: " + err);
-                callback(err);
-            });
-        }.bind(this));
-    filterLifeLevelCharacteristic
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["filter1_life"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifier2AirPurifierAccessory - FilterLifeLevel - getFilterLifeLevel: " + result);
-                callback(null, result[0]);
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifier2AirPurifierAccessory - FilterLifeLevel - getFilterLifeLevel Error: " + err);
-                callback(err);
-            });
-        }.bind(this));
-    // services.push(filterMaintenanceService);
-
-    return services;
-}
-
-MiAirPurifierAirPurifierAccessory.prototype.getModeByRotationSpeed = function(value) {
-    if(value > 0 && value <= 25) {
-        mode = 'low';
-    } else if(value > 25 && value <= 50) {
-        mode = 'medium';
-    } else if(value > 50 && value <= 70) {
-        mode = 'high';
-    } else if(value > 75 && value <= 100) {
-        mode = 'strong';
-    } else {
-        mode = 'low';
+            case Characteristic.TargetHeaterCoolerState.COOL:
+                var body;
+                this.log("냉방청정모드로 설정");
+                str = 'curl -X PUT -d \'{"modes": ["CoolClean"]}\' -v -k -H "Content-Type: application/json" -H "Authorization: Bearer ' + this.token + '" --cert ' + this.patchCert + ' --insecure https://' + this.ip + ':8888/devices/0/mode';
+                this.log(str);
+                this.execRequest(str, body, function(error, stdout, stderr) {
+                    if (error) {
+                        callback(error);
+                    } else {
+                        callback();
+                        this.log(stdout);
+                    }
+                }.bind(this));
+                break;
+        }
     }
-}
-
-MiAirPurifierBuzzerSwitchAccessory = function(dThis) {
-    this.device = dThis.device;
-    this.name = dThis.config['buzzerSwitchName'];
-    this.platform = dThis.platform;
-}
-
-MiAirPurifierBuzzerSwitchAccessory.prototype.getServices = function() {
-    var services = [];
-
-    var infoService = new Service.AccessoryInformation();
-    infoService
-        .setCharacteristic(Characteristic.Manufacturer, "XiaoMi")
-        .setCharacteristic(Characteristic.Model, "AirPurifier")
-        .setCharacteristic(Characteristic.SerialNumber, "Undefined");
-    services.push(infoService);
-    
-    var switchService = new Service.Switch(this.name);
-    switchService
-        .getCharacteristic(Characteristic.On)
-        .on('get', this.getBuzzerState.bind(this))
-        .on('set', this.setBuzzerState.bind(this));
-    services.push(switchService);
-
-    return services;
-}
-
-MiAirPurifierBuzzerSwitchAccessory.prototype.getBuzzerState = function(callback) {
-    var that = this;
-    this.device.call("get_prop", ["buzzer"]).then(result => {
-        that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierBuzzerSwitchAccessory - BuzzerSwitch - getBuzzerState: " + result);
-        callback(null, result[0] === "on" ? 1 : 0);
-    }).catch(function(err) {
-        that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierBuzzerSwitchAccessory - BuzzerSwitch - getBuzzerState Error: " + err);
-        callback(err);
-    });
-}
-
-MiAirPurifierBuzzerSwitchAccessory.prototype.setBuzzerState = function(value, callback) {
-    var that = this;
-    that.device.call("set_buzzer", [value ? "on" : "off"]).then(result => {
-        that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierBuzzerSwitchAccessory - BuzzerSwitch - setBuzzerState Result: " + result);
-        if(result[0] === "ok") {
-            callback(null);
-        } else {
-            callback(new Error(result[0]));
-        }            
-    }).catch(function(err) {
-        that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierBuzzerSwitchAccessory - BuzzerSwitch - setBuzzerState Error: " + err);
-        callback(err);
-    });
-}
-
-MiAirPurifierLEDBulbAccessory = function(dThis) {
-    this.device = dThis.device;
-    this.name = dThis.config['ledBulbName'];
-    this.platform = dThis.platform;
-}
-
-MiAirPurifierLEDBulbAccessory.prototype.getServices = function() {
-    var that = this;
-    var services = [];
-
-    var infoService = new Service.AccessoryInformation();
-    infoService
-        .setCharacteristic(Characteristic.Manufacturer, "XiaoMi")
-        .setCharacteristic(Characteristic.Model, "AirPurifier")
-        .setCharacteristic(Characteristic.SerialNumber, "Undefined");
-    services.push(infoService);
-    
-    var switchLEDService = new Service.Lightbulb(this.name);
-    var onCharacteristic = switchLEDService.getCharacteristic(Characteristic.On);
-    
-    onCharacteristic
-        .on('get', function(callback) {
-            this.device.call("get_prop", ["led"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]AirPurifierProLEDBulbAccessory - switchLED - getLEDPower: " + result);
-                callback(null, result[0] === "on" ? true : false);
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]AirPurifierProLEDBulbAccessory - switchLED - getLEDPower Error: " + err);
-                callback(err);
-            });
-        }.bind(this))
-        .on('set', function(value, callback) {
-            that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]AirPurifierProLEDBulbAccessory - switchLED - setLEDPower: " + value + ", nowValue: " + onCharacteristic.value);
-            this.device.call("set_led", [value ? "on" : "off"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]AirPurifierProLEDBulbAccessory - switchLED - setLEDPower Result: " + result);
-                if(result[0] === "ok") {
-                    callback(null);
-                } else {
-                    callback(new Error(result[0]));
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]AirPurifierProLEDBulbAccessory - switchLED - setLEDPower Error: " + err);
-                callback(err);
-            });
-        }.bind(this));
-    services.push(switchLEDService);
-
-    return services;
-}
-
-MiAirPurifierAirQualityAccessory = function(dThis) {
-    this.device = dThis.device;
-    this.name = dThis.config['airQualityName'];
-    this.platform = dThis.platform;
-}
-
-MiAirPurifierAirQualityAccessory.prototype.getServices = function() {
-    var that = this;
-    var services = [];
-    
-    var infoService = new Service.AccessoryInformation();
-    infoService
-        .setCharacteristic(Characteristic.Manufacturer, "XiaoMi")
-        .setCharacteristic(Characteristic.Model, "AirPurifier")
-        .setCharacteristic(Characteristic.SerialNumber, "Undefined");
-    services.push(infoService);
-    
-    var pmService = new Service.AirQualitySensor(this.name);
-    var pm2_5Characteristic = pmService.addCharacteristic(Characteristic.PM2_5Density);
-    pmService
-        .getCharacteristic(Characteristic.AirQuality)
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["aqi"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierAirQualityAccessory - AirQuality - getAirQuality: " + result);
-                
-                pm2_5Characteristic.updateValue(result[0]);
-                
-                if(result[0] <= 50) {
-                    callback(null, Characteristic.AirQuality.EXCELLENT);
-                } else if(result[0] > 50 && result[0] <= 100) {
-                    callback(null, Characteristic.AirQuality.GOOD);
-                } else if(result[0] > 100 && result[0] <= 200) {
-                    callback(null, Characteristic.AirQuality.FAIR);
-                } else if(result[0] > 200 && result[0] <= 300) {
-                    callback(null, Characteristic.AirQuality.INFERIOR);
-                } else if(result[0] > 300) {
-                    callback(null, Characteristic.AirQuality.POOR);
-                } else {
-                    callback(null, Characteristic.AirQuality.UNKNOWN);
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierAirQualityAccessory - AirQuality - getAirQuality Error: " + err);
-                callback(err);
-            });
-        }.bind(this));
-    services.push(pmService);
-
-    return services;
 }
