@@ -76,13 +76,7 @@ MiAirPurifier2SAirPurifierAccessory.prototype.getServices = function() {
     var activeCharacteristic = airPurifierService.getCharacteristic(Characteristic.Active);
     var currentAirPurifierStateCharacteristic = airPurifierService.getCharacteristic(Characteristic.CurrentAirPurifierState);
     var targetAirPurifierStateCharacteristic = airPurifierService.getCharacteristic(Characteristic.TargetAirPurifierState);
-    var lockPhysicalControlsCharacteristic = airPurifierService.addCharacteristic(Characteristic.LockPhysicalControls);
-    var rotationSpeedCharacteristic = airPurifierService.addCharacteristic(Characteristic.RotationSpeed);
     
-    var currentTemperatureCharacteristic = airPurifierService.addCharacteristic(Characteristic.CurrentTemperature);
-	var currentRelativeHumidityCharacteristic = airPurifierService.addCharacteristic(Characteristic.CurrentRelativeHumidity);
-    var pm25DensityCharacteristic = airPurifierService.addCharacteristic(Characteristic.PM2_5Density);
-    var airQualityCharacteristic = airPurifierService.addCharacteristic(Characteristic.AirQuality);
     services.push(airPurifierService);
     
     silentModeOnCharacteristic
