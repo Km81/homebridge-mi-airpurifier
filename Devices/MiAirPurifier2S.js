@@ -76,7 +76,6 @@ MiAirPurifier2SAirPurifierAccessory.prototype.getServices = function() {
     var activeCharacteristic = airPurifierService.getCharacteristic(Characteristic.Active);
     var currentAirPurifierStateCharacteristic = airPurifierService.getCharacteristic(Characteristic.CurrentAirPurifierState);
     var targetAirPurifierStateCharacteristic = airPurifierService.getCharacteristic(Characteristic.TargetAirPurifierState);
-    var lockPhysicalControlsCharacteristic = airPurifierService.addCharacteristic(Characteristic.LockPhysicalControls);
     var rotationSpeedCharacteristic = airPurifierService.addCharacteristic(Characteristic.RotationSpeed);
     
     services.push(airPurifierService);
@@ -194,30 +193,6 @@ MiAirPurifier2SAirPurifierAccessory.prototype.getServices = function() {
                 }
             }).catch(function(err) {
                 that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifier2SAirPurifierAccessory - CurrentAirPurifierState - getCurrentAirPurifierState Error: " + err);
-                callback(err);
-            });
-        }.bind(this));
-
-    lockPhysicalControlsCharacteristic
-        .on('get', function(callback) {
-            that.device.call("get_prop", ["child_lock"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifier2SAirPurifierAccessory - LockPhysicalControls - getLockPhysicalControls: " + result);
-                callback(null, result[0] === "on" ? Characteristic.LockPhysicalControls.CONTROL_LOCK_ENABLED : Characteristic.LockPhysicalControls.CONTROL_LOCK_DISABLED);
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifier2SAirPurifierAccessory - LockPhysicalControls - getLockPhysicalControls Error: " + err);
-                callback(err);
-            });
-        }.bind(this))
-        .on('set', function(value, callback) {
-            that.device.call("set_child_lock", [value ? "on" : "off"]).then(result => {
-                that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifier2SAirPurifierAccessory - LockPhysicalControls - setLockPhysicalControls Result: " + result);
-                if(result[0] === "ok") {
-                    callback(null);
-                } else {
-                    callback(new Error(result[0]));
-                }
-            }).catch(function(err) {
-                that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifier2SAirPurifierAccessory - LockPhysicalControls - setLockPhysicalControls Error: " + err);
                 callback(err);
             });
         }.bind(this));
