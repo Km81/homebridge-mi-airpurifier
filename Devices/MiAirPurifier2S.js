@@ -639,3 +639,4 @@ MiAirPurifier2SAirQualityAccessory.prototype.getServices = function() {
     services.push(pmService);
 
     return services;
+}
