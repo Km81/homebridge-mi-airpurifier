@@ -219,19 +219,7 @@ MiAirPurifierProAirPurifierAccessory.prototype.getServices = function() {
                     if(Characteristic.TargetAirPurifierState.AUTO == value) {
                         callback(null);
                     } else {
-                        that.device.call("get_prop", ["favorite_level"]).then(result => {
-                            that.platform.log.debug("[MiAirPurifierPlatform][DEBUG]MiAirPurifierProAirPurifierAccessory - TargetAirPurifierState - getRotationSpeed: " + result);
-                            silentModeOnCharacteristic.updateValue(false);
-                            if(rotationSpeedCharacteristic.value <= result[0] * 10 && rotationSpeedCharacteristic.value > (result[0] - 1) * 10) {
-                                callback(null);
-                            } else {
-                                rotationSpeedCharacteristic.value = result[0] * 10;
-                                callback(null);
-                            }
-                        }).catch(function(err) {
-                            that.platform.log.error("[MiAirPurifierPlatform][ERROR]MiAirPurifierProAirPurifierAccessory - TargetAirPurifierState - getRotationSpeed: " + err);
-                            callback(err);
-                        });
+                        callback(null);
                     }
                 } else {
                     callback(new Error(result[0]));
